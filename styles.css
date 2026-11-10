@@ -68,7 +68,7 @@ a{cursor:pointer}
 .steps{display:flex;gap:28px;margin:6px 0 18px;color:var(--mute);font-size:13px}
 .step.on{color:var(--blue);font-weight:600;border-bottom:2px solid var(--blue);padding-bottom:4px}
 .import-wrap{display:grid;grid-template-columns:1fr 320px;gap:20px}
-.drop{border:2px dashed #93c5fd;background:#f5f8ff;border-radius:8px;padding:50px;text-align:center;cursor:pointer}
+.drop{display:block;border:2px dashed #93c5fd;background:#f5f8ff;border-radius:8px;padding:50px;text-align:center;cursor:pointer}
 .drop.over{background:#e0ebff}
 .preview-tbl{overflow:auto;max-height:340px;border:1px solid var(--line);border-radius:6px}
 .preview-tbl table{border-collapse:collapse;font-size:12px;width:100%}
@@ -183,3 +183,7 @@ select,input[type=number],.fe-row input,#formula,.props input,.tpl-bar input{bor
 .tpl-in code{font-size:11px;color:var(--mute)}
 .tpl .outs{font-size:11px;color:#374151}
 @media (max-width:1000px){.tpl-detail{grid-template-columns:1fr}}
+/* keep Chart.js canvases inside grid cells (prevents runaway chart growth) */
+.kpis>*,.grid3>*,.grid2>*,.grid2b>*,.grid-dash>*,.dash>*,.mat>*,.tpl-detail>*,.import-wrap>*{min-width:0}
+.card canvas{max-width:100%}
+.main{overflow-x:hidden}
