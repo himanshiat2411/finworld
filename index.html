@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finworld</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M3 4h7v16H3zM12 2h3v18h-3zM17 6h4v14h-4z" opacity=".95"/></svg><span>FINWORLD</span></div>
+    <nav>
+      <a class="nav-item" data-route="home"><span class="ic">⌂</span>Home</a>
+      <div class="nav-label">BUILD</div>
+      <a class="nav-item" data-route="model"><span class="ic">⫶</span>Model</a>
+      <a class="nav-item" data-action="templates"><span class="ic">▦</span>Templates</a>
+      <a class="nav-item" data-route="import"><span class="ic">⛁</span>Data Source</a>
+      <a class="nav-item" data-action="scenario"><span class="ic">↗</span>Scenarios</a>
+      <div class="nav-label">ANALYZE</div>
+      <a class="nav-item" data-route="dashboard"><span class="ic">▤</span>Dashboard</a>
+      <a class="nav-item" data-action="soon"><span class="ic">☰</span>Report</a>
+      <a class="nav-item" data-route="model" data-tab="audit"><span class="ic">◷</span>Audit Trail</a>
+      <div class="nav-label">COLLABORATE</div>
+      <a class="nav-item" data-action="soon"><span class="ic">⚇</span>Shared with me</a>
+      <a class="nav-item" data-action="soon"><span class="ic">⚇</span>Team</a>
+      <div class="nav-label">TOOLS</div>
+      <a class="nav-item" data-action="nova"><span class="ic">✦</span>AI Assistant</a>
+      <a class="nav-item" data-action="soon"><span class="ic">⚙</span>Settings</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="search"><span>⌕</span><input id="globalSearch" placeholder="Search for models, data, templates...."></div>
+      <div class="top-actions">
+        <button class="link-btn" data-action="soon">🔔 Notifications</button>
+        <button class="link-btn" data-action="nova">? Help</button>
+        <div class="user">Devon <span class="avatar">D</span></div>
+      </div>
+    </header>
+
+    <!-- HOME -->
+    <section class="page" id="page-home">
+      <h1 class="welcome">Welcome, <span class="accent">Devon</span>👋</h1>
+      <p class="sub">Turn Ideas into actionable financial models</p>
+      <div class="hero-cards">
+        <button class="hero primary" data-action="newmodel"><span class="hero-ic">＋</span><span><b>New Model</b><small>Start from scratch</small></span></button>
+        <button class="hero" data-route="import"><span class="hero-ic dark">⤒</span><span><b>Import Data</b><small>Upload Excel or CSV</small></span></button>
+        <button class="hero" data-action="templates"><span class="hero-ic dark">▦</span><span><b>Start with Template</b><small>Choose from library</small></span></button>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Start Faster</h3><a class="more" data-action="templates">View all templates ›</a></div>
+        <div class="grid3">
+          <div class="mini-card">
+            <h4>Popular Templates</h4>
+            <a class="row-link" data-template="financial">📊 Financial Model <i>›</i></a>
+            <a class="row-link" data-template="startup">🥧 Startup Financial Plan <i>›</i></a>
+            <a class="row-link" data-template="revenue">📈 Revenue Forecast Model <i>›</i></a>
+            <a class="row-link" data-template="budget">🧾 Budget &amp; Planning Model <i>›</i></a>
+            <a class="more" data-action="templates">Browse All Templates ›</a>
+          </div>
+          <div class="mini-card">
+            <h4>Build with AI</h4>
+            <a class="row-link" data-ask="Suggest calculation for my model">🟢 <span>Generate Formula<small>Create formulas from your data</small></span><i>›</i></a>
+            <a class="row-link" data-ask="Give me insights on my model">✦ <span>Ask AI for insights<small>Turn data into smart answers</small></span><i>›</i></a>
+            <a class="row-link" data-ask="Analyze my data">🔵 <span>Analyze my data<small>Get instant data insights</small></span><i>›</i></a>
+            <a class="more" data-action="nova">Explore AI tools ›</a>
+          </div>
+          <div class="mini-card">
+            <h4>Import and Map Data</h4>
+            <a class="row-link" data-route="import">📶 <span>Connect a new data source<small>Databases, APIs &amp; more</small></span><i>›</i></a>
+            <a class="row-link" data-route="import">🟩 <span>Map Excel / CSV data<small>Quick data mapping</small></span><i>›</i></a>
+            <a class="row-link" data-route="import">📋 <span>View data sources<small>Manage your connections</small></span><i>›</i></a>
+            <a class="more" data-route="import">Go to data sources ›</a>
+          </div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Recent Models</h3>
+          <table class="tbl">
+            <thead><tr><th>Model Name</th><th>Last Modified</th><th>Model Health</th><th>Actions</th></tr></thead>
+            <tbody id="recentModels"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h3>Team Activity Feed</h3>
+          <ul class="feed" id="feed"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMPORT -->
+    <section class="page" id="page-import">
+      <div class="steps" id="importSteps"><span class="step on">1 Upload</span><span class="step">2 Preview Data</span><span class="step">3 Map Columns</span><span class="step">4 Confirmation</span></div>
+      <div class="import-wrap">
+        <div class="card import-main" id="importBody"></div>
+        <div class="card nova-side" data-nova-embed></div>
+      </div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section class="page" id="page-dashboard">
+      <div class="dash">
+        <div class="dash-inputs">
+          <div class="card slim"><div class="card-head"><b>Inputs &amp; Assumptions</b><a class="more" id="resetInputs">Reset all</a></div></div>
+          <div class="card slim" id="dashInputs"></div>
+          <button class="btn primary block" id="applyChanges">Apply changes</button>
+        </div>
+        <div class="dash-body">
+          <div class="page-head"><h2>Dashboard</h2><div><button class="btn" id="dlPdf">Download as PDF ⤓</button> <button class="btn" data-action="share">Share ↗</button></div></div>
+          <div class="grid3">
+            <div class="card kpi"><span>Total Revenue</span><b id="kRev"></b><canvas id="cRev" height="150"></canvas><div class="kfoot"><span>Growth rate</span><span id="kRevF"></span></div></div>
+            <div class="card kpi"><span>Net Profit</span><b id="kNet"></b><canvas id="cNet" height="150"></canvas><div class="kfoot"><span>Margin</span><span id="kNetF"></span></div></div>
+            <div class="card kpi"><span>Cash Forecast</span><b id="kCash" class="purple"></b><canvas id="cCash" height="150"></canvas><div class="kfoot"><span>Lowest month</span><span id="kCashF"></span></div></div>
+          </div>
+          <div class="grid-dash">
+            <div>
+              <div class="card insights"><div class="card-head"><b>✦ Insights</b></div><div class="ins-row" id="insights"></div></div>
+              <div class="grid2b">
+                <div class="card"><b>Expenses Breakdown</b><div class="donut-wrap"><canvas id="cExp" width="150" height="150"></canvas><ul class="legend" id="expLegend"></ul></div></div>
+                <div class="card"><b>Profit Margin</b><div id="margins"></div></div>
+              </div>
+              <div class="card"><b>Revenue &amp; Net Profit Trend</b><canvas id="cTrend" height="110"></canvas></div>
+            </div>
+            <div>
+              <div class="card nova-side" data-nova-embed></div>
+              <div class="card"><b>Top Expenses</b><div id="topExp"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODEL ANALYSIS TOOL -->
+    <section class="page" id="page-model">
+      <div class="mat">
+        <div class="card sources">
+          <div class="card-head"><b>Add Sources</b></div>
+          <p class="hint">Connect or import data to use in your model</p>
+          <div class="nav-label dark">IMPORT FILES</div>
+          <label class="src-item"><input type="file" id="excelInput" accept=".xlsx,.xls,.csv" hidden>🟩 <span>Excel/CSV<small>.xlsx, .xls, csv — click to upload</small></span><i>›</i></label>
+          <a class="src-item" id="sampleExcel">📄 <span>Try a sample sheet<small>Loads a demo P&amp;L workbook</small></span><i>›</i></a>
+          <a class="src-item" data-action="soon">🟢 <span>Google Sheets<small>Import from Google Sheets</small></span><i>›</i></a>
+          <div class="nav-label dark">CONNECT DATA</div>
+          <a class="src-item" data-action="soon">⛁ <span>Database<small>Connect to SQL database</small></span><i>›</i></a>
+          <a class="src-item" data-action="soon">&lt;/&gt; <span>API Connector<small>Fetch data from APIs</small></span><i>›</i></a>
+          <div class="nav-label dark">CONNECTED SOURCES (<span id="srcCount">0</span>)</div>
+          <div id="connected"></div>
+        </div>
+        <div class="mat-center">
+          <div class="page-head"><h2>Model Analysis Tool <small id="modelName"></small></h2><div><button class="btn" data-action="share">Share ↗</button> <button class="btn primary" data-route="dashboard">View Dashboard</button></div></div>
+          <div class="card structure">
+            <div class="card-head"><b>Model Structure</b><span class="hint">Click an input to edit its value · click a calculation to edit its formula</span></div>
+            <div class="flow" id="flow">
+              <svg id="wires"></svg>
+              <div class="col"><h5 class="blue">INPUT</h5><div id="colIn"></div></div>
+              <div class="col"><h5 class="green">CALCULATIONS</h5><div id="colCalc" class="dashed"></div></div>
+              <div class="col"><h5 class="purple">OUTPUT</h5><div id="colOut"></div></div>
+            </div>
+          </div>
+          <div class="card editor">
+            <div class="tabs"><a class="tab on" data-tab="formula">Formula Editor</a><a class="tab" data-tab="sheet">Sheet View</a><a class="tab" data-tab="audit">Audit Trail</a></div>
+            <div class="tab-body" id="tab-formula">
+              <div class="fe">
+                <div class="fe-inputs"><h5>Available Inputs</h5><div id="availInputs"></div><a class="more" id="addComponent">＋ Add Components</a></div>
+                <div class="fe-main">
+                  <div class="fe-row"><input id="calcName" placeholder="Calculation name (e.g. Total Revenue)"><label class="chk"><input type="checkbox" id="calcIsOutput" checked> Output</label></div>
+                  <input id="formula" class="mono" placeholder="= Start typing a formula or click inputs / operators">
+                  <div class="ops" id="ops"></div>
+                  <div class="pv"><div><h5>Preview</h5><div id="preview" class="mono">---</div></div><div><h5>Dependencies</h5><div id="deps" class="mono">No dependencies yet</div></div></div>
+                  <div class="fe-actions"><button class="btn" id="cancelCalc">Cancel</button> <button class="btn danger" id="deleteCalc" hidden>Delete</button> <button class="btn primary" id="saveCalc">Save Calculation</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="tab-body" id="tab-sheet" hidden><div id="sheetView"></div></div>
+            <div class="tab-body" id="tab-audit" hidden><ul class="feed" id="audit"></ul></div>
+          </div>
+        </div>
+        <div class="mat-right">
+          <div class="card"><b>Component Graph</b><canvas id="cComp" height="170"></canvas></div>
+          <div class="card" id="propCard"><b>Component Property</b><div id="props"></div></div>
+          <div class="card nova-side" data-nova-embed></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Templates modal -->
+<div class="modal" id="tplModal" hidden>
+  <div class="modal-box">
+    <div class="card-head"><h2>Choose a template</h2><button class="x" data-close>✕</button></div>
+    <div class="tpl-bar"><input id="tplSearch" placeholder="Search templates..."><div class="chips" id="tplChips"></div></div>
+    <div class="tpl-grid" id="tplGrid"></div>
+  </div>
+</div>
+
+<!-- Nova chat drawer -->
+<div class="drawer" id="novaDrawer" hidden>
+  <div class="card-head"><b><span class="accent">✦ Nova</span> AI Assistant</b><button class="x" data-close>✕</button></div>
+  <div class="chat" id="chat"></div>
+  <form class="ask" id="chatForm"><input id="chatInput" placeholder="Ask Nova anything — e.g. 'what is EBITDA' or 'set price per unit to 1500'"><button>➤</button></form>
+</div>
+<button class="nova-fab" data-action="nova">✦ Nova</button>
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
