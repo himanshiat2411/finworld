@@ -171,3 +171,15 @@ select,input[type=number],.fe-row input,#formula,.props input,.tpl-bar input{bor
 .toast.show{transform:translateX(-50%) translateY(0)}
 @media (max-width:1200px){.mat{grid-template-columns:1fr}.dash,.grid-dash,.import-wrap{grid-template-columns:1fr}}
 @media (max-width:800px){.sidebar{display:none}.main{padding:0 16px 40px}.grid3,.grid2,.grid2b,.hero-cards{grid-template-columns:1fr}.drawer{left:16px;right:16px;width:auto}}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
+.kpi small.k-sub{display:block;color:var(--mute);font-size:11px}
+.empty-dash{text-align:center;padding:50px}
+.tpl-detail{display:grid;grid-template-columns:1.4fr 1fr;gap:20px}
+.tpl-detail h2{margin:6px 0}
+.tpl-in{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.tpl-in td{padding:7px 4px;border-top:1px solid #f1f5f9}
+.tpl-in input{border:1px solid #d1d5db;border-radius:4px;padding:6px 8px;width:150px;font:inherit}
+.tpl-in code{font-size:11px;color:var(--mute)}
+.tpl .outs{font-size:11px;color:#374151}
+@media (max-width:1000px){.tpl-detail{grid-template-columns:1fr}}

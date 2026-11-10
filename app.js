@@ -45,7 +45,7 @@ const BLANK = () => ({
 });
 function mkInput([label, value, src]) { return { id: slug(label), label, value: +value, src: src || 'manual' }; }
 function mkCalc(name, formula, output) { return { id: slug(name), name, formula, output: !!output, fmt: 'Number', dp: 0 }; }
-let model = BLANK();
+let model = BLANK(); model.baseline = model.inputs.map(i => i.value);
 let selected = null; // {kind:'input'|'calc', id}
 let editing = null; // calc id under edit
 function audit(t) { model.audit.unshift({ t, at: now() }); if (route === 'model') renderAudit(); }
@@ -98,6 +98,7 @@ function go(r, opts = {}) {
   if (r === 'dashboard') renderDash();
   if (r === 'model') { renderModel(); if (opts.tab) setTab(opts.tab); }
   if (r === 'import') renderImport();
+  if (r === 'templates') renderTemplates();
   renderNovaEmbeds();
 }
 
@@ -112,28 +113,69 @@ function renderHome() {
   $('#feed').innerHTML = FEED.map(([a, t, w]) => `<li><span class="avatar">${a}</span><div>${t}<small>${w}</small></div></li>`).join('');
 }
 
-/* ---------------- Templates modal ---------------- */
-let tplCat = 'All';
-function openTemplates() {
-  $('#tplModal').hidden = false;
+/* ---------------- Template flow: 1 Choose → 2 Customize → 3 Build ---------------- */
+let tplCat = 'All', tplDraft = null;
+function openTemplates() { tplDraft = null; go('templates'); }
+function renderTemplates() {
+  $$('#tplSteps .step').forEach((s, i) => s.classList.toggle('on', i === (tplDraft ? 1 : 0)));
+  $('#tplList').hidden = !!tplDraft; $('#tplDetail').hidden = !tplDraft;
+  if (tplDraft) return renderTplDetail();
   const cats = ['All', ...new Set(TEMPLATES.map(t => t.cat))];
   $('#tplChips').innerHTML = cats.map(c => `<button class="${c === tplCat ? 'on' : ''}" data-cat="${c}">${c}</button>`).join('');
-  renderTplGrid(); $('#tplSearch').focus();
+  renderTplGrid();
 }
 function renderTplGrid() {
   const q = $('#tplSearch').value.toLowerCase();
   const list = TEMPLATES.filter(t => (tplCat === 'All' || t.cat === tplCat) && (t.name + t.desc).toLowerCase().includes(q));
-  $('#tplGrid').innerHTML = (list.map(t => `<div class="tpl" data-template="${t.id}"><span class="em">${t.em}</span><b>${t.name}</b><p>${t.desc}</p><span class="tag">${t.cat} · ${t.inputs.length} inputs · ${t.calcs.length} calcs</span></div>`).join('')) ||
-    '<p class="hint">No templates match. Try asking Nova to build one.</p>';
+  $('#tplGrid').innerHTML = list.map(t => `<div class="tpl" data-pick-template="${t.id}"><span class="em">${t.em}</span><b>${t.name}</b><p>${t.desc}</p>
+    <span class="outs">Outputs: ${t.calcs.filter(c => c[2]).map(c => c[0]).join(', ')}</span><span class="tag">${t.cat} · ${t.inputs.length} inputs · ${t.calcs.length} calcs</span></div>`).join('') +
+    `<div class="tpl" data-action="newmodel" style="border-style:dashed"><span class="em">＋</span><b>Blank model</b><p>Start from scratch or upload your own Excel data.</p></div>`;
 }
-function loadTemplate(id) {
+function pickTemplate(id) {
   const t = TEMPLATES.find(x => x.id === id); if (!t) return;
-  model = { name: t.name, inputs: t.inputs.map(mkInput), calcs: t.calcs.map(([n, f, o]) => mkCalc(n, f, o)), sources: [], audit: [] };
-  audit(`Created model from template “${t.name}”`);
-  $('#tplModal').hidden = true; selected = null; editing = null;
-  go('model'); toast(`Template “${t.name}” loaded`);
-  nova(`Loaded the **${t.name}** template with ${t.inputs.length} inputs and ${t.calcs.length} calculations. Change any input value and every output recalculates. Ask me things like “set ${t.inputs[0][0].replace(/\s*\(.*\)/, '')} to ${Math.round(t.inputs[0][1] * 1.2)}”.`, false);
+  go('templates'); tplDraft = { t, name: t.name, values: t.inputs.map(i => i[1]) }; renderTemplates();
 }
+function draftModel(d) { return { name: d.name, inputs: d.t.inputs.map((i, k) => mkInput([i[0], d.values[k]])), calcs: d.t.calcs.map(([n, f, o]) => mkCalc(n, f, o)), sources: [], audit: [] }; }
+function withModel(m, fn) { const saved = model; model = m; try { return fn(); } finally { model = saved; } }
+function renderTplDetail() {
+  const d = tplDraft, t = d.t;
+  $('#tplDetail').innerHTML = `<a class="more" data-tpl-back style="margin:0 0 12px">‹ Back to all templates</a>
+  <div class="tpl-detail">
+    <div>
+      <div class="card"><span style="font-size:30px">${t.em}</span><h2>${t.name}</h2><p class="hint">${t.desc}</p>
+        <div class="field" style="margin-top:14px"><label>Model name</label><input id="tplName" value="${esc(d.name)}" style="border:1px solid #d1d5db;border-radius:4px;padding:8px;width:100%;font:inherit"></div></div>
+      <div class="card"><b>Step 2 · Customize inputs</b><p class="hint">Replace the example values with your own numbers. You can change them later or import them from Excel inside the model.</p>
+        <table class="tpl-in">${t.inputs.map((i, k) => `<tr><td>⛁ ${esc(i[0])}<br><code>${slug(i[0])}</code></td><td style="text-align:right"><input type="number" data-tplin="${k}" value="${d.values[k]}"></td></tr>`).join('')}</table></div>
+      <div class="card"><b>Calculations included</b><p class="hint">The model logic you get — fully editable in the Formula Editor.</p>
+        <table class="tpl-in" id="tplCalcs"></table></div>
+    </div>
+    <div>
+      <div class="card" style="position:sticky;top:12px"><b>Live preview</b><p class="hint">Outputs computed from the inputs on the left.</p>
+        <canvas id="cTplPrev" height="200"></canvas>
+        <div id="tplOutVals" style="margin:10px 0"></div>
+        <button class="btn primary block" data-use-template="model">Step 3 · Build model →</button>
+        <button class="btn block" style="margin-top:8px" data-use-template="dashboard">Build &amp; open dashboard</button>
+      </div>
+    </div>
+  </div>`;
+  updateTplPreview();
+}
+function updateTplPreview() {
+  const m = draftModel(tplDraft);
+  const rows = withModel(m, () => m.calcs.map(c => { const v = calcValue(c); return [c, v, fmtCalc(c, v)]; }));
+  $('#tplCalcs').innerHTML = rows.map(([c, , f]) => `<tr><td>${c.output ? '◎' : 'ƒ'} ${esc(c.name)}<br><code>= ${esc(c.formula)}</code></td><td style="text-align:right"><b>${f}</b></td></tr>`).join('');
+  const outs = rows.filter(r => r[0].output && r[1] != null);
+  $('#tplOutVals').innerHTML = outs.map(([c, , f]) => `<div class="margin-card"><span>${esc(c.name)}</span><b>${f}</b></div>`).join('');
+  chart('cTplPrev', { type: 'bar', data: { labels: outs.map(o => o[0].name), datasets: [{ data: outs.map(o => o[1]), backgroundColor: '#2563eb', borderRadius: 4 }] }, options: hOpts });
+}
+function useTemplate(dest) {
+  const t = tplDraft.t;
+  model = draftModel(tplDraft); model.baseline = model.inputs.map(i => i.value);
+  audit(`Created model from template “${t.name}”`); tplDraft = null; selected = null; editing = null;
+  go(dest); toast(`“${model.name}” created from ${t.name}`);
+  nova(`Built **${model.name}** from the ${t.name} template. The dashboard is generated from these calculations — change an input and everything updates. Try “what are key profitability drivers?”`, false);
+}
+function loadTemplate(id) { pickTemplate(id); }
 
 /* ---------------- Model Analysis Tool ---------------- */
 function renderModel() {
@@ -201,8 +243,9 @@ function upsertCalc(name, formula, output, oldId) {
 }
 function setInput(id, v, why = 'manually') {
   const i = model.inputs.find(x => x.id === id); if (!i) return;
-  audit(`${i.label}: ${num(i.value)} → ${num(v)} (${why})`); i.value = +v;
+  audit(`${i.label}: ${num(i.value)} → ${num(v)} (${why})`); if (i.series && i.value) { const k = v / i.value; i.series = i.series.map(x => x * k); } i.value = +v;
   if (route === 'model') { renderModel(); $('#n-' + id)?.classList.add('flash'); }
+  if (route === 'dashboard') renderDash();
 }
 function renderProps() {
   const p = $('#props');
@@ -235,6 +278,7 @@ function setTab(t) { $$('.tab').forEach(x => x.classList.toggle('on', x.dataset.
 let charts = {};
 function chart(id, cfg) { charts[id]?.destroy(); charts[id] = new Chart($('#' + id), cfg); }
 const baseOpts = { plugins: { legend: { display: false } }, maintainAspectRatio: true, scales: { x: { grid: { display: false }, ticks: { font: { size: 9 } } }, y: { ticks: { font: { size: 9 } }, grid: { color: '#f1f5f9' } } } };
+const hOpts = { ...baseOpts, indexAxis: 'y', scales: { x: { type: 'linear', ticks: { font: { size: 9 } }, grid: { color: '#f1f5f9' } }, y: { type: 'category', grid: { display: false }, ticks: { font: { size: 10 } } } } };
 function renderCompChart() {
   const outs = model.calcs.filter(c => c.output).map(c => [c.name, calcValue(c)]).filter(x => x[1] != null);
   chart('cComp', { type: 'bar', data: { labels: outs.map(o => o[0]), datasets: [{ data: outs.map(o => o[1]), backgroundColor: '#2563eb', borderRadius: 4 }] }, options: baseOpts });
@@ -257,23 +301,28 @@ function analyzeRows(rows) {
   const headerIsText = rows[0] && rows[0].filter(c => c !== '').every(c => !isNum(c));
   if (kv.length >= 2 && kv.length >= rows.length * 0.6 && (width <= 3 || !headerIsText)) return { kind: 'kv', fields: kv.map(r => ({ label: r[0].trim(), value: toNum(r[1]), agg: 'Value', include: true })) };
   const [head, ...body] = rows;
+  const lc = (head || []).findIndex((h, ci) => body.length > 1 && body.every(r => r[ci] !== '' && !isNum(r[ci])));
+  const periods = lc >= 0 ? body.map(r => String(r[lc])) : null, periodLabel = lc >= 0 ? String(head[lc]) : null;
   const fields = (head || []).map((h, ci) => {
     const vals = body.map(r => r[ci]).filter(isNum).map(toNum);
     if (vals.length < Math.max(1, body.length * 0.6)) return null;
     return { label: String(h || 'Column ' + (ci + 1)).trim(), col: ci, vals, agg: 'Sum', include: true, value: vals.reduce((a, b) => a + b, 0) };
   }).filter(Boolean);
-  return { kind: 'table', fields };
+  return { kind: 'table', fields, periods, periodLabel };
 }
 const AGG = { Sum: v => v.reduce((a, b) => a + b, 0), Average: v => AGG.Sum(v) / v.length, First: v => v[0], Last: v => v[v.length - 1], Max: v => Math.max(...v), Min: v => Math.min(...v), Value: (v, f) => f.value };
-function mergeIntoModel(fileName, fields, rowsCount) {
+function mergeIntoModel(fileName, fields, rowsCount, periods, periodLabel) {
+  if (periods) { model.periods = periods; model.periodLabel = periodLabel; }
   let added = 0, updated = 0;
   fields.filter(f => f.include).forEach(f => {
     const val = f.vals ? AGG[f.agg](f.vals) : f.value, id = slug(f.label);
     const ex = model.inputs.find(i => i.id.toLowerCase() === id.toLowerCase());
-    if (ex) { ex.value = val; ex.src = fileName; updated++; } else { model.inputs.push(mkInput([f.label, val, fileName])); added++; }
+    const ser = periods && f.vals && f.vals.length === periods.length ? f.vals.slice() : null;
+    if (ex) { ex.value = val; ex.src = fileName; ex.series = ser; updated++; } else { const ni = mkInput([f.label, val, fileName]); ni.series = ser; model.inputs.push(ni); added++; }
   });
   model.sources = model.sources.filter(s => s.name !== fileName);
   model.sources.push({ name: fileName, info: `${rowsCount} rows · imported ${now()}` });
+  model.baseline = model.inputs.map(i => i.value);
   audit(`Imported ${fileName}: ${added} new inputs, ${updated} updated`);
   return { added, updated };
 }
@@ -284,7 +333,7 @@ function afterImport(name, r) {
 }
 async function quickImport(file) {
   try { const { name, rows } = await readFile(file); const a = analyzeRows(rows); if (!a.fields.length) return toast('No numeric columns found in ' + name);
-    const r = mergeIntoModel(name, a.fields, rows.length); go('model'); afterImport(name, r);
+    const r = mergeIntoModel(name, a.fields, rows.length, a.periods, a.periodLabel); go('model'); afterImport(name, r);
   } catch (e) { toast('Could not read file: ' + e.message); }
 }
 const SAMPLE = [['Month', 'Revenue', 'COGS', 'Operating Expenses', 'Marketing', 'Units Sold'], ...['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'].map((m, i) => [m, 820000 + i * 61000, 410000 + i * 26000, 150000 + i * 4000, 60000 + i * 5000, 680 + i * 45])];
@@ -323,48 +372,90 @@ async function wizLoad(file) {
 }
 function startWizard(name, rows) {
   const a = analyzeRows(rows); if (!a.fields.length) return toast('No numeric data found in ' + name);
-  wiz = { step: 2, name, rows, fields: a.fields }; renderImport();
+  wiz = { step: 2, name, rows, fields: a.fields, periods: a.periods, periodLabel: a.periodLabel }; renderImport();
 }
 
-/* ---------------- Dashboard ---------------- */
-const DASH_DEFAULT = { price: 1200, units: 50000, growth: 12, varCost: 600, fixedCost: 50000, inflation: 30, tax: 25 };
-let dash = { ...DASH_DEFAULT };
-const DASH_FIELDS = [['REVENUE DRIVERS', [['price', 'Price per Unit (₹)', 50], ['units', 'Units Sold (1 year)', 1000], ['growth', 'Revenue Growth Rate (%)', 1]]],
-  ['COST DRIVERS', [['varCost', 'Variable Cost per Unit (₹)', 25], ['fixedCost', 'Fixed Cost per Month (₹)', 5000], ['inflation', 'Cost Inflation Rate (%)', 1]]],
-  ['TAX & FINANCING', [['tax', 'Tax Rate (%)', 1]]]];
-function dashCalc(d = dash) {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const season = [0.92, 0.88, 1.02, 0.95, 1.05, 1.0, 0.97, 1.03, 1.08, 1.12, 1.06, 0.92];
-  const rev = months.map((_, m) => (d.price * d.units / 12) * Math.pow(1 + d.growth / 100, m / 12) * season[m]);
-  const cost = months.map((_, m) => d.varCost * d.units / 12 * season[m] + d.fixedCost * Math.pow(1 + d.inflation / 100, m / 12));
-  const pbt = rev.map((r, m) => r - cost[m]); const net = pbt.map(p => (p > 0 ? p * (1 - d.tax / 100) : p));
-  let cash = 0; const cashArr = net.map(n => (cash += n * 0.8));
-  const totalRev = rev.reduce((a, b) => a + b, 0), totalNet = net.reduce((a, b) => a + b, 0), totalVar = d.varCost * d.units, totalFixed = cost.reduce((a, b) => a + b, 0) - totalVar;
-  return { months, rev, cost, net, cashArr, totalRev, totalNet, totalVar, totalFixed, gross: (totalRev - totalVar) / totalRev * 100, op: (totalRev - totalVar - totalFixed) / totalRev * 100, netM: totalNet / totalRev * 100 };
+/* ---------------- Dashboard: generated entirely from the active model ---------------- */
+const isPct = c => c.fmt === 'Percent' || /%/.test(c.name);
+function workingOutputs() { const o = model.calcs.filter(c => c.output && calcValue(c) != null); return o.length ? o : model.calcs.filter(c => calcValue(c) != null); }
+/* per-period values when imported data had rows (e.g. months) */
+function periodValues(c) {
+  const ser = model.inputs.filter(i => i.series && model.periods && i.series.length === model.periods.length);
+  if (!ser.length) return null;
+  return model.periods.map((_, p) => { const old = ser.map(i => i.value); ser.forEach(i => (i.value = i.series[p])); const v = calcValue(c); ser.forEach((i, k) => (i.value = old[k])); return v; });
+}
+const SWEEP = [-30, -20, -10, 0, 10, 20, 30];
+const sweepLabels = SWEEP.map(p => (p > 0 ? '+' : '') + p + '%');
+function sweep(inp, c) { const old = inp.value; const r = SWEEP.map(p => { inp.value = old * (1 + p / 100); return calcValue(c); }); inp.value = old; return r; }
+function driversOf(c) {
+  const base = calcValue(c); if (base == null) return [];
+  return model.inputs.map(i => { const old = i.value; i.value = old * 1.1; const v = calcValue(c); i.value = old; return [i, v == null || !base ? 0 : (v - base) / Math.abs(base) * 100]; })
+    .filter(r => Math.abs(r[1]) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
 }
 function renderDashInputs() {
-  $('#dashInputs').innerHTML = DASH_FIELDS.map(([g, fs]) => `<div class="group"><h4>${g}</h4>${fs.map(([k, l, st]) => `<div class="field"><label>${l}</label><div class="stepper"><input type="number" value="${dash[k]}" data-dash="${k}"><button data-step="${k}" data-by="${-st}">−</button><button data-step="${k}" data-by="${st}">+</button></div></div>`).join('')}</div>`).join('');
+  $('#dashInputs').innerHTML = model.inputs.map(i => {
+    const st = Math.abs(i.value) >= 100 ? Math.pow(10, Math.floor(Math.log10(Math.abs(i.value))) - 1) : 1;
+    return `<div class="field"><label>${esc(i.label)}</label><div class="stepper"><input type="number" value="${+(+i.value).toFixed(4)}" data-dash="${i.id}"><button data-step="${i.id}" data-by="${-st}">−</button><button data-step="${i.id}" data-by="${st}">+</button></div></div>`;
+  }).join('') || '<p class="hint">No inputs yet.</p>';
 }
+const PALETTE = ['#2563eb', '#16a34a', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#14532d'];
+const legendOpts = { ...baseOpts, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8, font: { size: 11 } } } } };
 function renderDash() {
-  if (!$('#dashInputs').children.length) renderDashInputs();
-  const r = dashCalc(), yrs = [2022, 2023, 2024, 2025, 2026];
-  $('#kRev').textContent = inr(r.totalRev); $('#kRevF').textContent = '↑ ' + dash.growth + '%';
-  $('#kNet').textContent = inr(r.totalNet); $('#kNetF').textContent = num(r.netM, 1) + '%';
-  $('#kCash').textContent = inr(r.cashArr[11]); const lo = r.cashArr.indexOf(Math.min(...r.cashArr)); $('#kCashF').textContent = r.months[lo] + ' · ' + inr(r.cashArr[lo]);
-  const k = v => v / 1e5; // lakhs
-  chart('cRev', { type: 'line', data: { labels: r.months, datasets: [{ data: r.rev.map(k), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,.12)', fill: true, tension: .35, pointRadius: 0 }] }, options: baseOpts });
-  chart('cNet', { type: 'bar', data: { labels: yrs, datasets: [{ data: yrs.map((_, i) => k(r.totalRev / Math.pow(1 + dash.growth / 100, 4 - i))), backgroundColor: '#14532d' }, { data: yrs.map((_, i) => k(r.totalNet / Math.pow(1 + dash.growth / 100, 4 - i))), backgroundColor: '#eab308' }] }, options: baseOpts });
-  chart('cCash', { type: 'line', data: { labels: r.months, datasets: [{ data: r.cashArr.map(k), borderColor: '#3b5bfd', pointBackgroundColor: '#fff', tension: 0 }] }, options: baseOpts });
-  chart('cTrend', { type: 'line', data: { labels: r.months, datasets: [{ label: 'Revenue', data: r.rev.map(k), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,.08)', fill: true, pointRadius: 0 }, { label: 'Net Profit', data: r.net.map(k), borderColor: '#14532d', backgroundColor: 'rgba(20,83,45,.12)', fill: true, pointRadius: 0 }] }, options: { ...baseOpts, plugins: { legend: { display: true, position: 'right', labels: { boxWidth: 8, font: { size: 11 } } } } } });
-  const exp = [['Salaries', r.totalFixed * .5, '#2563eb'], ['Marketing', r.totalFixed * .2, '#22c55e'], ['Operations', r.totalVar, '#f59e0b'], ['Rent & Utilities', r.totalFixed * .18, '#f87171'], ['Technology', r.totalFixed * .12, '#06b6d4']];
-  const tot = exp.reduce((a, e) => a + e[1], 0);
-  chart('cExp', { type: 'doughnut', data: { labels: exp.map(e => e[0]), datasets: [{ data: exp.map(e => e[1]), backgroundColor: exp.map(e => e[2]) }] }, options: { plugins: { legend: { display: false } }, cutout: '55%', responsive: false } });
-  $('#expLegend').innerHTML = exp.map(e => `<li><span><i style="background:${e[2]}"></i>${e[0]}</span><span>${inr(e[1])}</span><span>${num(e[1] / tot * 100, 0)}%</span></li>`).join('') + `<li style="border-top:1px solid #e5e7eb;margin-top:6px;padding-top:8px"><b>Total Expenses</b><b>${inr(tot)}</b></li>`;
-  $('#margins').innerHTML = [['Gross Profit Margin', r.gross], ['Operating Profit Margin', r.op], ['Net Profit Margin', r.netM]].map(([l, v]) => `<div class="margin-card"><span>${l}<b>${num(v, 1)}%</b></span><span style="color:${v >= 0 ? '#16a34a' : '#dc2626'}">${v >= 0 ? '▲ healthy' : '▼ loss'}</span></div>`).join('');
-  $('#topExp').innerHTML = exp.sort((a, b) => b[1] - a[1]).slice(0, 4).map(e => `<div style="margin-top:12px;font-size:13px;display:flex;justify-content:space-between"><span>${e[0]}</span><span>${num(e[1] / tot * 100, 1)}%</span></div><div class="bar"><i style="width:${e[1] / tot * 100}%"></i></div>`).join('');
-  const lowCash = r.cashArr.some(c => c < 0);
-  $('#insights').innerHTML = [[`Revenue grows ${dash.growth}% YoY`, `${inr(r.rev[0])} → ${inr(r.rev[11])} / month`], [`Operations are ${num(r.totalVar / tot * 100, 0)}% of expenses`, 'variable cost × units'], [lowCash ? 'Cash dips below zero' : `Net margin ${num(r.netM, 1)}%`, lowCash ? 'review fixed costs or pricing' : 'after ' + dash.tax + '% tax']]
-    .map(([a, b]) => `<div>📈 ${a}<small>${b}</small></div>`).join('');
+  $('#dashModelName').textContent = model.name; renderDashInputs();
+  const outs = workingOutputs();
+  $('#dashEmpty').hidden = !!outs.length; $('#dashContent').hidden = !outs.length;
+  $('#dashSub').textContent = outs.length ? `· ${model.name} · ${model.inputs.length} inputs · ${outs.length} outputs` : '';
+  if (!outs.length) return;
+  const hasPeriods = outs.some(c => periodValues(c));
+  const money = outs.filter(c => !isPct(c));
+  const key = money[0] || outs[0];
+  const drv = driversOf(key), top = drv[0] && drv[0][0];
+  // KPI cards (first 4 outputs)
+  const k4 = outs.slice(0, 4);
+  $('#kpis').innerHTML = k4.map((c, n) => {
+    const d = driversOf(c)[0];
+    const foot = hasPeriods ? ['By ' + (model.periodLabel || 'period'), model.periods.length + ' periods'] : d ? ['Top driver', `${esc(d[0].label)} (${d[1] >= 0 ? '+' : ''}${num(d[1], 1)}%)`] : ['Formula', esc(c.formula)];
+    return `<div class="card kpi"><span>${esc(c.name)}</span><b>${fmtCalc(c, calcValue(c))}</b><canvas id="k${n}" height="110"></canvas><div class="kfoot"><span>${foot[0]}</span><span>${foot[1]}</span></div></div>`;
+  }).join('');
+  k4.forEach((c, n) => {
+    const pv = periodValues(c), d = driversOf(c)[0];
+    const data = pv || (d ? sweep(d[0], c) : [calcValue(c)]), labels = pv ? model.periods : d ? sweepLabels : [''];
+    chart('k' + n, { type: n % 2 ? 'bar' : 'line', data: { labels, datasets: [{ data, borderColor: PALETTE[n], backgroundColor: n % 2 ? PALETTE[n] : 'rgba(37,99,235,.12)', fill: true, tension: .35, pointRadius: 2 }] }, options: baseOpts });
+  });
+  // Trend: real periods if imported, else what-if sweep on the top driver
+  const trendSet = (money.length ? money : outs).slice(0, 4);
+  if (hasPeriods) {
+    $('#trendTitle').textContent = 'Trend by ' + (model.periodLabel || 'period');
+    $('#trendHint').textContent = 'Each calculation evaluated row-by-row on your imported data.';
+    chart('cTrend', { type: 'line', data: { labels: model.periods, datasets: trendSet.map((c, n) => ({ label: c.name, data: periodValues(c), borderColor: PALETTE[n], backgroundColor: 'transparent', tension: .3 })) }, options: legendOpts });
+  } else if (top) {
+    $('#trendTitle').textContent = `What-if: ${top.label} −30% → +30%`;
+    $('#trendHint').textContent = 'How each output moves (% change) as your biggest driver changes. Upload data with rows (e.g. months) to see a time trend instead.';
+    chart('cTrend', { type: 'line', data: { labels: sweepLabels, datasets: outs.slice(0, 4).map((c, n) => { const b = calcValue(c); return { label: c.name, data: sweep(top, c).map(v => (v == null || !b ? 0 : (v - b) / Math.abs(b) * 100)), borderColor: PALETTE[n], backgroundColor: 'transparent', tension: .3 }; }) }, options: legendOpts });
+  } else { $('#trendTitle').textContent = 'Trend'; $('#trendHint').textContent = 'No input drives these outputs yet.'; charts.cTrend?.destroy(); }
+  chart('cOuts', { type: 'bar', data: { labels: trendSet.map(c => c.name), datasets: [{ data: trendSet.map(calcValue), backgroundColor: trendSet.map((_, n) => PALETTE[n]), borderRadius: 4 }] }, options: hOpts });
+  // Composition: cost-like inputs, else positive money outputs
+  let comp = model.inputs.filter(i => /cost|expense|cogs|marketing|salar|rent|spend|burn|opex/i.test(i.label) && !/%|per unit|rate/i.test(i.label) && i.value > 0).map(i => [i.label, i.value]);
+  let title = 'Cost Composition';
+  if (comp.length < 2) { comp = money.filter(c => calcValue(c) > 0).map(c => [c.name, calcValue(c)]); title = 'Output Composition'; }
+  $('#compCard').hidden = comp.length < 2; $('#compTitle').textContent = title;
+  if (comp.length >= 2) {
+    const tot = comp.reduce((a, e) => a + e[1], 0);
+    chart('cExp', { type: 'doughnut', data: { labels: comp.map(e => e[0]), datasets: [{ data: comp.map(e => e[1]), backgroundColor: PALETTE }] }, options: { plugins: { legend: { display: false } }, cutout: '55%', responsive: false } });
+    $('#expLegend').innerHTML = comp.map((e, n) => `<li><span><i style="background:${PALETTE[n % 7]}"></i>${esc(e[0])}</span><span>${num(e[1] / tot * 100, 0)}%</span></li>`).join('') + `<li style="border-top:1px solid #e5e7eb;margin-top:6px;padding-top:8px"><b>Total</b><b>${inr(tot)}</b></li>`;
+  }
+  // Drivers
+  $('#drvHint').textContent = `Impact of +10% in each input on ${key.name}`;
+  const mx = Math.max(...drv.map(d => Math.abs(d[1])), 1);
+  $('#topExp').innerHTML = drv.slice(0, 6).map(([i, v]) => `<div style="margin-top:12px;font-size:13px;display:flex;justify-content:space-between"><span>${esc(i.label)}</span><span style="color:${v >= 0 ? '#16a34a' : '#dc2626'}">${v >= 0 ? '+' : ''}${num(v, 1)}%</span></div><div class="bar"><i style="width:${Math.abs(v) / mx * 100}%;background:${v >= 0 ? '#2563eb' : '#ef4444'}"></i></div>`).join('') || '<p class="hint">No input affects this output.</p>';
+  // Insights
+  const ins = [];
+  if (top) ins.push([`${top.label} is the biggest lever`, `+10% moves ${key.name} by ${num(drv[0][1], 1)}%`]);
+  const neg = outs.find(c => calcValue(c) < 0); if (neg) ins.push([`${neg.name} is negative`, fmtCalc(neg, calcValue(neg))]);
+  const pc = outs.find(isPct); if (pc) ins.push([`${pc.name}: ${fmtCalc(pc, calcValue(pc))}`, '= ' + pc.formula]);
+  if (hasPeriods) { const pv = periodValues(key); const ch = pv[0] ? (pv[pv.length - 1] - pv[0]) / Math.abs(pv[0]) * 100 : 0; ins.push([`${key.name} ${ch >= 0 ? 'grew' : 'fell'} ${num(Math.abs(ch), 1)}%`, `${model.periods[0]} → ${model.periods[model.periods.length - 1]}`]); }
+  if (ins.length < 3) ins.push([`${outs.length} live outputs`, `from ${model.inputs.length} inputs`]);
+  $('#insights').innerHTML = ins.slice(0, 3).map(([a, b]) => `<div>📈 ${esc(a)}<small>${esc(b)}</small></div>`).join('');
 }
 
 /* ---------------- Nova AI ---------------- */
@@ -404,7 +495,6 @@ const GLOSSARY = {
   'inflation': 'Inflation is the rate at which prices rise over time; in a model it compounds costs: Cost × (1 + inflation)ᵗ.',
 };
 const ALIAS = { 'gross profit margin': 'gross margin', 'profit and loss': 'p&l', 'p and l': 'p&l', 'income statement': 'p&l', 'breakeven': 'break even', 'break-even': 'break even', 'lifetime value': 'ltv', 'customer acquisition cost': 'cac', 'net present value': 'npv', 'internal rate of return': 'irr', 'discounted cash flow': 'dcf', 'cost of goods sold': 'cogs', 'return on investment': 'roi', 'fcf': 'free cash flow' };
-const DASH_ALIAS = { price: ['price', 'price per unit', 'selling price', 'unit price'], units: ['units', 'units sold', 'volume', 'quantity', 'sales volume'], growth: ['growth', 'growth rate', 'revenue growth'], varCost: ['variable cost', 'variable', 'unit cost', 'cost per unit'], fixedCost: ['fixed cost', 'fixed', 'overhead', 'fixed costs'], inflation: ['inflation', 'cost inflation'], tax: ['tax', 'tax rate'] };
 
 function parseAmount(s) {
   const m = String(s).replace(/,/g, '').match(/(-?\d+(?:\.\d+)?)\s*(k|thousand|m|mn|million|l|lakh|lac|cr|crore)?\b/i); if (!m) return null;
@@ -415,13 +505,6 @@ const words = s => s.toLowerCase().replace(/\(.*?\)|₹|%/g, ' ').split(/[^a-z0-
 /* Returns {target, key, label, value, set(v)} for whichever input set is active */
 function matchTarget(phrase) {
   const pw = words(phrase); if (!pw.length) return null;
-  if (route === 'dashboard') {
-    let best = null, bs = 0;
-    for (const [k, al] of Object.entries(DASH_ALIAS)) for (const a of al) { const aw = words(a); const s = aw.filter(w => pw.includes(w)).length / aw.length + (phrase.toLowerCase().includes(a) ? 1 : 0); if (s > bs) { bs = s; best = k; } }
-    if (!best || bs < .5) return null;
-    const lab = DASH_FIELDS.flatMap(g => g[1]).find(f => f[0] === best)[1];
-    return { label: lab, value: dash[best], set: v => { dash[best] = v; renderDashInputs(); renderDash(); } };
-  }
   let best = null, bs = 0;
   model.inputs.forEach(i => { const iw = words(i.label + ' ' + i.id.replace(/_/g, ' ')); const s = pw.filter(w => iw.includes(w) || iw.some(x => x.startsWith(w) && w.length > 2)).length / Math.max(pw.length, 1); if (s > bs) { bs = s; best = i; } });
   if (!best || bs < .34) return null;
@@ -452,17 +535,16 @@ function novaReply(raw) {
   const t = raw.trim(), q = t.toLowerCase();
   // navigation
   let m = q.match(/\b(go to|open|show|take me to)\s+(the\s+)?(dashboard|home|templates?|model|model analysis|import|data source)/);
-  if (m) { const k = m[3]; if (k.startsWith('template')) { openTemplates(); return 'Opened the template library — pick one to start.'; } const r = k === 'home' ? 'home' : k === 'dashboard' ? 'dashboard' : k.startsWith('import') || k.startsWith('data') ? 'import' : 'model'; go(r); return `Done — you’re on ${r === 'model' ? 'the Model Analysis Tool' : r}.`; }
+  if (m) { const k = m[3]; if (k.startsWith('template')) { openTemplates(); return 'Opened the template library — pick one, customise its inputs, then build.'; } const r = k === 'home' ? 'home' : k === 'dashboard' ? 'dashboard' : k.startsWith('import') || k.startsWith('data') ? 'import' : 'model'; go(r); return `Done — you’re on ${r === 'model' ? 'the Model Analysis Tool' : r}.`; }
   // load a template
   const tpl = TEMPLATES.find(x => q.includes(x.name.toLowerCase().replace(/ model| calculator| analysis/, '')) && /(template|load|use|start|build|create)/.test(q) && !/statement/.test(q));
-  if (tpl) { loadTemplate(tpl.id); return `Started a new model from the **${tpl.name}** template.`; }
+  if (tpl) { pickTemplate(tpl.id); return `Opened the **${tpl.name}** template — adjust the inputs to your numbers, then click “Build model”.`; }
   // what-if (non-destructive)
   m = q.match(/what if\s+(.+?)\s+(increases?|decreases?|goes up|goes down|drops?|rises?|is|was|becomes?)\s+(?:by\s+|to\s+)?(-?[\d.,]+\s*(?:k|m|l|lakh|cr|crore)?)\s*(%)?/);
   if (m) {
     const tg = matchTarget(m[1]); if (!tg) return `I couldn’t find an input matching “${m[1]}”.`;
     const amt = parseAmount(m[3]), down = /decrease|down|drop/.test(m[2]), abs = /is|was|become/.test(m[2]);
     const nv = abs ? amt : m[4] ? tg.value * (1 + (down ? -amt : amt) / 100) : tg.value + (down ? -amt : amt);
-    if (route === 'dashboard') { const before = dashCalc().totalNet, key = Object.keys(dash).find(k => dash[k] === tg.value); const after = dashCalc({ ...dash, [key]: nv }).totalNet; return `What-if: ${tg.label} ${num(tg.value)} → ${num(nv)}\nNet profit would go from ${inr(before)} to ${inr(after)} (${after >= before ? '+' : ''}${num((after - before) / Math.abs(before || 1) * 100, 1)}%).\nSay “apply it” or “set ${words(tg.label).join(' ')} to ${Math.round(nv)}” to make it real.`; }
     const inp = model.inputs.find(i => i.id === tg.id), old = inp.value, outs = model.calcs.filter(c => c.output);
     const before = outs.map(c => calcValue(c)); inp.value = nv; const after = outs.map(c => calcValue(c)); inp.value = old;
     lastWhatIf = { id: tg.id, v: nv };
@@ -471,7 +553,7 @@ function novaReply(raw) {
   if (/^(apply it|apply|yes,? apply|keep it)/.test(q) && lastWhatIf) { setInput(lastWhatIf.id, lastWhatIf.v, 'what-if applied by Nova'); lastWhatIf = null; return '✅ Applied. All calculations updated.'; }
   // set / change
   m = t.match(/\b(?:set|change|make|update|put)\s+(?:the\s+)?(.+?)\s+(?:to|=|as)\s+(-?[\d.,]+\s*(?:k|m|l|lakh|lac|cr|crore|million|thousand)?)/i);
-  if (m) { const tg = matchTarget(m[1]); if (!tg) return `I couldn’t find an input called “${m[1]}”. Available: ${route === 'dashboard' ? Object.keys(DASH_ALIAS).join(', ') : model.inputs.map(i => i.label).join(', ')}.`; const v = parseAmount(m[2]); const old = tg.value; tg.set(v); return `✅ ${tg.label}: ${num(old)} → ${num(v)}. Everything downstream has been recalculated.`; }
+  if (m) { const tg = matchTarget(m[1]); if (!tg) return `I couldn’t find an input called “${m[1]}”. Available: ${model.inputs.map(i => i.label).join(', ')}.`; const v = parseAmount(m[2]); const old = tg.value; tg.set(v); return `✅ ${tg.label}: ${num(old)} → ${num(v)}. Everything downstream has been recalculated.`; }
   m = t.match(/\b(increase|raise|grow|bump|decrease|reduce|lower|cut|drop)\s+(?:the\s+)?(.+?)\s+by\s+(-?[\d.,]+\s*(?:k|m|l|lakh|cr|crore)?)\s*(%|percent)?/i);
   if (m) { const tg = matchTarget(m[2]); if (!tg) return `I couldn’t find an input called “${m[2]}”.`; const a = parseAmount(m[3]), down = /decrease|reduce|lower|cut|drop/i.test(m[1]); const v = m[4] ? tg.value * (1 + (down ? -a : a) / 100) : tg.value + (down ? -a : a); const old = tg.value; tg.set(+v.toFixed(4)); return `✅ ${tg.label}: ${num(old)} → ${num(v)} (${down ? '−' : '+'}${num(a)}${m[4] ? '%' : ''}).`; }
   // add input
@@ -507,20 +589,15 @@ function novaReply(raw) {
     return 'Here are calculations that fit your inputs — say “add calculation …” with any of them:\n' + s.map(x => '• ' + x).join('\n') + '\n\nOr say “create a profit & loss statement” to build the full structure.';
   }
   if (/driver|sensitiv|what matters|impact/.test(q)) {
-    if (route === 'dashboard') { const b = dashCalc().totalNet; const rows = Object.keys(dash).map(k => [DASH_FIELDS.flatMap(g => g[1]).find(f => f[0] === k)[1], (dashCalc({ ...dash, [k]: dash[k] * 1.1 }).totalNet - b) / Math.abs(b) * 100]).sort((a, c) => Math.abs(c[1]) - Math.abs(a[1])); return 'Impact of a +10% change on Net Profit:\n' + rows.map(r => `• ${r[0]}: ${r[1] >= 0 ? '+' : ''}${num(r[1], 1)}%`).join('\n') + `\n\nTop driver: **${rows[0][0]}**.`; }
     const s = sensitivity(); if (!s) return 'Add at least one calculation first — then I can rank which inputs drive it.';
     return `Key drivers of **${s.tgt.name}** (impact of +10% on each input):\n` + s.rows.map(r => `• ${r[0]}: ${r[1] >= 0 ? '+' : ''}${num(r[1], 1)}%`).join('\n') + (s.rows[0] ? `\n\n${s.rows[0][0]} is your biggest lever.` : '');
   }
   if (/insight|analy[sz]e|summar|how (is|am) (my|i)|health/.test(q)) {
-    if (route === 'dashboard') { const r = dashCalc(); return `Snapshot:\n• Revenue ${inr(r.totalRev)} (growing ${dash.growth}%/yr)\n• Gross margin ${num(r.gross, 1)}%, net margin ${num(r.netM, 1)}%\n• Year-end cash ${inr(r.cashArr[11])}${r.cashArr.some(c => c < 0) ? '\n⚠️ Cash goes negative in some months — consider lowering fixed costs.' : ''}`; }
     const outs = model.calcs.filter(c => calcValue(c) != null);
     if (!outs.length) return `Your model has ${model.inputs.length} inputs but no calculations yet. Say “suggest calculation for my model”.`;
     const s = sensitivity();
     return `**${model.name}** — ${model.inputs.length} inputs, ${outs.length} working calculations:\n` + outs.map(c => `• ${c.name}: ${fmtCalc(c, calcValue(c))}`).join('\n') + (s?.rows[0] ? `\n\nBiggest driver of ${s.tgt.name}: ${s.rows[0][0]}.` : '');
   }
-  if (/ad spe+d|ad spend|marketing/.test(q) && route === 'dashboard') return `Marketing is ~20% of fixed costs (${inr(dashCalc().totalFixed * .2)}). Each extra 1,000 units adds ${inr((dash.price - dash.varCost) * 1000)} contribution, so ad spend that brings > ${num(dashCalc().totalFixed * .2 / Math.max(dash.price - dash.varCost, 1), 0)} units/year pays for itself.`;
-  if (/cash reserve|cash low|runway/.test(q) && route === 'dashboard') { const r = dashCalc(); const lo = Math.min(...r.cashArr); return lo < 0 ? `Cash turns negative (${inr(lo)}) during the year. Try “reduce fixed cost by 10%” or “increase price by 5%”.` : `Cash stays positive all year, ending at ${inr(r.cashArr[11])}. Lowest point: ${inr(lo)}.`; }
-  if (/q4|forecast/.test(q) && route === 'dashboard') return `Q4 revenue is projected at ${inr(dashCalc().rev.slice(9).reduce((a, b) => a + b, 0))}. To adjust it, change the growth rate — e.g. “set growth rate to 15”.`;
   // glossary
   const key = Object.keys(ALIAS).find(a => q.includes(a)); const term = key ? ALIAS[key] : Object.keys(GLOSSARY).sort((a, b) => b.length - a.length).find(g => new RegExp('\\b' + g.replace(/[&]/g, '\\&') + '\\b').test(q));
   if (term) { let extra = ''; const c = model.calcs.find(x => words(x.name).join(' ').includes(term)); if (c && calcValue(c) != null) extra = `\n\nIn your model, ${c.name} is currently ${fmtCalc(c, calcValue(c))}.`; return GLOSSARY[term] + extra; }
@@ -537,7 +614,8 @@ function ask(text) {
   setTimeout(() => { let r; try { r = novaReply(text); } catch (e) { r = 'Sorry, something went wrong: ' + e.message; } nova(r); }, 350);
 }
 const SUGG = { home: ['What is EBITDA?', 'Open templates', 'Explain burn rate'], import: ['How should I map my columns?', 'What is COGS?', 'Explain gross margin'],
-  dashboard: ['⚙ Optimize ad spend allocation', '⚠ Cash reserves low in 6 months?', '⟳ Forecast: adjust Q4 projection', 'What are key profitability drivers?'],
+  dashboard: ['Give me insights on my model', 'What are key profitability drivers?', 'Suggest calculation for my model'],
+  templates: ['What is a DCF?', 'Explain break even', 'What is LTV?'],
   model: ['Suggest calculation for my model', 'What are key profitability drivers?', 'Create a profit & loss statement'] };
 function renderNovaEmbeds() {
   const last = chatLog.slice(-2);
@@ -550,17 +628,20 @@ function renderNovaEmbeds() {
 
 /* ---------------- Events ---------------- */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-route],[data-action],[data-template],[data-ask],[data-close],[data-node],[data-insert],[data-add-calc],[data-edit-calc],[data-del-input],[data-open-recent],[data-cat],[data-wiz],[data-step],.tab');
+  const t = e.target.closest('[data-pick-template],[data-use-template],[data-tpl-back],[data-route],[data-action],[data-template],[data-ask],[data-close],[data-node],[data-insert],[data-add-calc],[data-edit-calc],[data-del-input],[data-open-recent],[data-cat],[data-wiz],[data-step],.tab');
   if (!t) return;
   if (t.matches('.tab')) return setTab(t.dataset.tab);
-  if (t.dataset.route) return go(t.dataset.route, { tab: t.dataset.tab });
+  if (t.dataset.pickTemplate) return pickTemplate(t.dataset.pickTemplate);
+  if (t.dataset.useTemplate) return useTemplate(t.dataset.useTemplate);
+  if (t.dataset.tplBack !== undefined) { tplDraft = null; return renderTemplates(); }
+  if (t.dataset.route) { if (t.dataset.route === 'templates') tplDraft = null; return go(t.dataset.route, { tab: t.dataset.tab }); }
   if (t.dataset.template) return loadTemplate(t.dataset.template);
   if (t.dataset.ask) return ask(t.dataset.ask);
-  if (t.dataset.close !== undefined) return (t.closest('.modal,.drawer').hidden = true);
-  if (t.dataset.cat) { tplCat = t.dataset.cat; return openTemplates(); }
+  if (t.dataset.close !== undefined) return (t.closest('.drawer').hidden = true);
+  if (t.dataset.cat) { tplCat = t.dataset.cat; return renderTemplates(); }
   if (t.dataset.wiz) { wiz.step = +t.dataset.wiz; return renderImport(); }
-  if (t.dataset.step) { const k = t.dataset.step; dash[k] = Math.max(0, +(dash[k] + +t.dataset.by).toFixed(2)); renderDashInputs(); return renderDash(); }
-  if (t.dataset.openRecent) { loadTemplate(['financial', 'revenue', 'breakeven', 'budget'][+t.dataset.openRecent]); return; }
+  if (t.dataset.step) { const i = model.inputs.find(x => x.id === t.dataset.step); return setInput(i.id, +(i.value + +t.dataset.by).toFixed(4), 'dashboard'); }
+  if (t.dataset.openRecent) { const tt = TEMPLATES.find(x => x.id === ['financial', 'revenue', 'breakeven', 'budget'][+t.dataset.openRecent]); tplDraft = { t: tt, name: RECENT[+t.dataset.openRecent][1], values: tt.inputs.map(i => i[1]) }; return useTemplate('model'); }
   if (t.dataset.node) { const [kind, id] = t.dataset.node.split(':'); selected = { kind, id }; if (kind === 'calc') { startEdit(id); } renderModel(); if (kind === 'input') $('[data-prop="value"]')?.select(); return; }
   if (t.dataset.insert) { const f = $('#formula'); f.value = (f.value.trim() ? f.value.trimEnd() + ' ' : '') + t.dataset.insert + ' '; f.focus(); return livePreview(); }
   if (t.dataset.addCalc !== undefined) { selected = null; startEdit(null); $('#calcIsOutput').checked = false; $('#calcName').focus(); return; }
@@ -568,10 +649,10 @@ document.addEventListener('click', e => {
   if (t.dataset.delInput) { const i = model.inputs.find(x => x.id === t.dataset.delInput); model.inputs = model.inputs.filter(x => x !== i); audit('Removed input ' + i.label); selected = null; return renderModel(); }
   const a = t.dataset.action;
   if (a === 'templates') openTemplates();
-  else if (a === 'newmodel') { model = BLANK(); model.name = 'New Model'; audit('Created new model'); selected = null; go('model'); toast('New model created'); }
+  else if (a === 'newmodel') { tplDraft = null; model = BLANK(); model.baseline = model.inputs.map(i => i.value); model.name = 'New Model'; audit('Created new model'); selected = null; go('model'); toast('New model created'); }
   else if (a === 'nova') { $('#novaDrawer').hidden = !$('#novaDrawer').hidden; $('#chatInput').focus(); }
   else if (a === 'share') { navigator.clipboard?.writeText(location.href); toast('Share link copied to clipboard'); }
-  else if (a === 'scenario') { go('dashboard'); nova('Scenarios: ask me “what if price per unit increases by 10%” to compare outcomes without changing your plan.'); }
+  else if (a === 'scenario') { go('dashboard'); nova(`Scenarios: ask me “what if ${model.inputs[0] ? words(model.inputs[0].label).join(' ') : 'price'} increases by 10%” to compare outcomes without changing your model.`); }
   else if (a === 'soon') toast('Not part of this prototype yet');
 });
 ['#chatForm'].forEach(s => $(s).addEventListener('submit', e => { e.preventDefault(); const i = $('#chatInput'); ask(i.value); i.value = ''; }));
@@ -580,10 +661,12 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'formula') livePreview();
   if (t.id === 'tplSearch') renderTplGrid();
-  if (t.dataset.dash) { dash[t.dataset.dash] = +t.value || 0; clearTimeout(t._d); t._d = setTimeout(renderDash, 250); }
+  if (t.dataset.tplin) { tplDraft.values[t.dataset.tplin] = +t.value || 0; updateTplPreview(); }
+  if (t.id === 'tplName') tplDraft.name = t.value;
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.dataset.dash) return setInput(t.dataset.dash, +t.value || 0, 'dashboard');
   if (t.dataset.sheetInput) return setInput(t.dataset.sheetInput, +t.value, 'sheet view');
   if (t.dataset.prop && selected) {
     if (selected.kind === 'input') { if (t.dataset.prop === 'value') setInput(selected.id, +t.value); else { const i = model.inputs.find(x => x.id === selected.id); i.label = t.value; renderModel(); } }
@@ -600,21 +683,18 @@ document.addEventListener('dragleave', e => e.target.closest?.('#drop')?.classLi
 document.addEventListener('drop', e => { const d = e.target.closest?.('#drop,.sources'); if (!d) return; e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return; d.id === 'drop' ? wizLoad(f) : quickImport(f); });
 document.addEventListener('click', e => {
   if (e.target.id === 'wizSample') startWizard('Financials_Q1_2026.xlsx', SAMPLE);
-  if (e.target.id === 'wizFinish') { const nm = wiz.name, r = mergeIntoModel(nm, wiz.fields, wiz.rows.length); wiz = { step: 1 }; go('model'); afterImport(nm, r); }
-  if (e.target.closest('#sampleExcel')) { const a = analyzeRows(SAMPLE); const r = mergeIntoModel('Financials_Q1_2026.xlsx', a.fields, SAMPLE.length); renderModel(); afterImport('Financials_Q1_2026.xlsx', r); }
+  if (e.target.id === 'wizFinish') { const nm = wiz.name, r = mergeIntoModel(nm, wiz.fields, wiz.rows.length, wiz.periods, wiz.periodLabel); wiz = { step: 1 }; go('model'); afterImport(nm, r); }
+  if (e.target.closest('#sampleExcel')) { const a = analyzeRows(SAMPLE); const r = mergeIntoModel('Financials_Q1_2026.xlsx', a.fields, SAMPLE.length, a.periods, a.periodLabel); renderModel(); afterImport('Financials_Q1_2026.xlsx', r); }
   if (e.target.id === 'saveCalc') saveCalc();
   if (e.target.id === 'cancelCalc') { editing = null; $('#calcName').value = ''; $('#formula').value = ''; livePreview(); }
   if (e.target.id === 'deleteCalc' && editing) { model.calcs = model.calcs.filter(c => c.id !== editing); audit('Deleted calculation ' + editing); editing = null; selected = null; $('#calcName').value = ''; $('#formula').value = ''; renderModel(); }
   if (e.target.id === 'addComponent') { const n = prompt('Input name (e.g. Marketing Spend (₹))'); if (!n) return; const v = prompt('Value', '0'); model.inputs.push(mkInput([n, parseAmount(v) || 0])); audit('Added input ' + n); renderModel(); }
-  if (e.target.id === 'resetInputs') { dash = { ...DASH_DEFAULT }; renderDashInputs(); renderDash(); toast('Inputs reset'); }
-  if (e.target.id === 'applyChanges') { renderDash(); toast('Dashboard updated'); }
+  if (e.target.id === 'resetInputs') { (model.baseline || []).forEach((v, k) => model.inputs[k] && (model.inputs[k].value = v)); audit('Inputs reset to baseline'); renderDash(); toast('Inputs reset'); }
   if (e.target.id === 'dlPdf') window.print();
 });
 $('#ops').innerHTML = ['+', '−', '*', '/', '(', ')', '^', 'IF', 'SUM', 'AVERAGE', 'MIN', 'MAX', 'ROUND', 'ABS'].map(o => `<button data-op="${o}">${o}</button>`).join('');
 $('#ops').addEventListener('click', e => { const o = e.target.dataset.op; if (!o) return; const f = $('#formula'); f.value += /^[A-Z]+$/.test(o) ? ` ${o}(` : ` ${o === '−' ? '-' : o} `; f.focus(); livePreview(); });
 $('#formula').addEventListener('keydown', e => e.key === 'Enter' && saveCalc());
 $('#globalSearch').addEventListener('keydown', e => { if (e.key !== 'Enter') return; const v = e.target.value.trim(); if (!v) return; const tp = TEMPLATES.find(t => t.name.toLowerCase().includes(v.toLowerCase())); if (tp) { openTemplates(); $('#tplSearch').value = v; renderTplGrid(); } else ask(v); e.target.value = ''; });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#tplModal').hidden = true; } });
-$('#tplModal').addEventListener('click', e => { if (e.target.id === 'tplModal') e.target.hidden = true; });
 
 renderChat(); go('home');
